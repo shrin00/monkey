@@ -1,15 +1,14 @@
 package request
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"strings"
 )
 
-type Request struct {
-	RequestLine RequestLine
-}
+type StateParse string
 
 type RequestLine struct {
 	Method        string
@@ -17,52 +16,134 @@ type RequestLine struct {
 	HttpVersion   string
 }
 
-func RequestFromReader(reader io.Reader) (*Request, error) {
-	// declare a new request
-	msg, err := io.ReadAll(reader)
-	if err != nil {
-		log.Println("error: ", err.Error())
-		return nil, err
-	}
-
-	http_message := strings.Split(string(msg), "\r\n")
-	fmt.Println(http_message)
-	request_line, err := parseRequestLine(http_message[0])
-	if err != nil {
-		return nil, err
-	}
-
-	return &Request{
-		RequestLine: *request_line,
-	}, nil
+type Request struct {
+	RequestLine RequestLine
+	State       StateParse
 }
 
-func parseRequestLine(requestLine string) (*RequestLine, error) {
-	reqLineSections := strings.Split(requestLine, " ")
+const (
+	StateInit StateParse = "initialized"
+	StateDone StateParse = "done"
+)
+
+var ErrorMalformedRequestLine = fmt.Errorf("malformed request line")
+var ErrorUnsupportedHttpVersion = fmt.Errorf("unsupported http version")
+var SEPARATOR = []byte("\r\n")
+
+func newRequest() *Request {
+	return &Request{
+		State: StateInit,
+	}
+}
+
+func parseRequestLine(message []byte) (*RequestLine, int, error) {
+
+	// check if the message contains SEPARATOR
+	sepIndex := bytes.Index(message, SEPARATOR)
+	if sepIndex == -1 {
+		return nil, 0, nil
+		// if we don't find the SEPARATOR in the sent message,
+		// then it means we don't have the complete request line and can't parse the request-line
+	}
+
+	// if SEPARATOR exists, then slice the byte till the sepIndex and we get the request-line
+	rl := string(message[:sepIndex])
+	numOfBytes := len(rl) + len(SEPARATOR)
+	fmt.Println("request line: ", rl)
+
+	parts := strings.Split(rl, " ")
 	// strings.Fields() - a good way to split strings around white space
-	if len(reqLineSections) != 3 {
+	if len(parts) != 3 {
 		err := fmt.Errorf("error: malformed request line")
 		log.Println(err)
-		return nil, err
+		return nil, 0, err
 	}
-	method := reqLineSections[0]
-	reqTarget := reqLineSections[1]
-	httpVersion := strings.Split(reqLineSections[2], "/")[1]
+	method := parts[0]
+	reqTarget := parts[1]
+	httpVersion := strings.Split(parts[2], "/")[1]
 
 	if strings.ToUpper(method) != method {
-		err := fmt.Errorf("error: malformed request method")
-		log.Println(err)
-		return nil, err
+		log.Println("error: ", ErrorMalformedRequestLine)
+		return nil, 0, fmt.Errorf("to upper")
 	}
 
 	if httpVersion != "1.1" {
-		err := fmt.Errorf("error: unsupported http version")
-		return nil, err
+		log.Println("error: ", ErrorUnsupportedHttpVersion)
+		return nil, 0, ErrorUnsupportedHttpVersion
 	}
 
 	return &RequestLine{
 		Method:        method,
 		RequestTarget: reqTarget,
 		HttpVersion:   httpVersion,
-	}, nil
+	}, numOfBytes, nil
+}
+
+func RequestFromReader(reader io.Reader) (*Request, error) {
+	rq := newRequest()
+
+	// create a slice of byte to read the data into memory, which we call buf
+	buf := make([]byte, 1024)
+	bufLen := 0
+
+	for !rq.done() {
+		n, err := reader.Read(buf[bufLen:])
+		if err != nil {
+			log.Println("error: ", err.Error())
+			return nil, err
+		}
+
+		bufLen += n
+		readN, err := rq.parse(buf[:bufLen])
+		if err != nil {
+			return nil, err
+		}
+
+		copy(buf, buf[readN:bufLen])
+		bufLen -= readN
+	}
+
+	// http_message := strings.Split(string(msg), "\r\n")
+	// // fmt.Println(http_message)
+	// request_line, n, err := parseRequestLine(buf)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// return &Request{
+	// 	RequestLine: *request_line,
+	// }, nil
+
+	return rq, nil
+}
+
+func (r *Request) done() bool {
+	return r.State == StateDone
+}
+
+func (r *Request) parse(data []byte) (int, error) {
+	read := 0
+
+outer:
+	for {
+		switch r.State {
+		case StateInit:
+			rl, n, err := parseRequestLine(data[read:])
+			if err != nil {
+				return 0, err
+			}
+			if n == 0 {
+				break outer
+			}
+
+			r.RequestLine = *rl
+			read += n
+
+			r.State = StateDone
+
+		case StateDone:
+			break outer
+		}
+	}
+	return read, nil
 }
