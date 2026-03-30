@@ -9,26 +9,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// type chunkReader struct {
+// 	data            string
+// 	numBytesPerRead int
+// 	pos             int
+// }
+
+// // Read reads up to len(p) or numBytesPerRead bytes from the string pe call
+// // its useful for simulating reading a variable number of bytes per chunk from a network connection
+// func (cr *chunkReader) Read(p []byte) (n int, err error) {
+// 	if cr.pos >= len(cr.data) {
+// 		return 0, io.EOF
+// 	}
+// 	endIndex := cr.pos + cr.numBytesPerRead
+// 	if endIndex > len(cr.data) {
+// 		endIndex = len(cr.data)
+// 	}
+
+// 	n = copy(p, []byte(cr.data[cr.pos:endIndex]))
+// 	cr.pos += n
+
+// 	return n, nil
+// }
+
 type chunkReader struct {
-	data            string
-	numBytesPerRead int
-	pos             int
+	data            string // data to be read
+	numBytesPerRead int    // number of bytes that can be read at time per read call
+	pos             int    // pointer to the bytes, utill which bytes are read
 }
 
-// Read reads up to len(p) or numBytesPerRead bytes from the string pe call
-// its useful for simulating reading a variable number of bytes per chunk from a network connection
-func (cr *chunkReader) Read(p []byte) (n int, err error) {
-	if cr.pos >= len(cr.data) {
+func (c *chunkReader) Read(p []byte) (int, error) {
+
+	// if the possition is greater than the length of data, then all bytes are read
+	if c.pos >= len(c.data) {
 		return 0, io.EOF
 	}
-	endIndex := cr.pos + cr.numBytesPerRead
-	if endIndex > len(cr.data) {
-		endIndex = len(cr.data)
+	// we will read numOfButesPerRead bytes at a time and copy it to p
+	// we copy a slice of the data, startIndex of the slice will be pos pointer
+	// and endIndex of the slice is pos+numOfBytesPerRead
+	endIndex := c.pos + c.numBytesPerRead
+	if endIndex > len(c.data) {
+		endIndex = len(c.data) // checking if endIndex is not be greater than the len of data
 	}
+	n := copy(p, []byte(c.data[c.pos:endIndex]))
 
-	n = copy(p, []byte(cr.data[cr.pos:endIndex]))
-	cr.pos += n
-
+	c.pos += n
 	return n, nil
 }
 
