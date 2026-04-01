@@ -7,13 +7,16 @@ import (
 	"io"
 	"log"
 	"strings"
+
+	"github.com/shrin00/moneky/internal/headers"
 )
 
 type StateParse string
 
 const (
-	StateInit StateParse = "init"
-	StateDone StateParse = "done"
+	StateInit           StateParse = "init"
+	StateDone           StateParse = "done"
+	StateParsingHeaders StateParse = "parsing-headers"
 )
 
 // define a request line
@@ -23,19 +26,10 @@ type RequestLine struct {
 	HttpVersion   string
 }
 
-// define header item
-type headerItem struct {
-	key   string
-	value string
-}
-
-// define header
-type Header []headerItem
-
 // define a request
 type Request struct {
 	RequestLine *RequestLine
-	Header      Header
+	Headers     headers.Headers
 	Body        []byte
 	State       StateParse // indicates the state of the request parsing
 }
@@ -43,7 +37,8 @@ type Request struct {
 // create a new Request
 func newRequest() *Request {
 	return &Request{
-		State: StateInit,
+		State:   StateInit,
+		Headers: headers.NewHeaders(),
 	}
 }
 
@@ -68,9 +63,11 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	bufLen := 0 // length of the buffer, number of bytes in the buf, we will set it to 0, since len(buf) is 1024
 	// var requestLine *RequestLine
 	for !rq.done() {
-		fmt.Println("Length of the buf just after initialization", bufLen)
+		// fmt.Println("Length of the buf just after initialization", bufLen)
 		// readN - how much bytes from raw request is read into buf
+		// read into buffer
 		readN, err := reader.Read(buf[bufLen:]) // io.Reader has a Read function, which should read the data into the slice of type []byte
+
 		if err != nil {
 			err := fmt.Errorf("failed to read the request message: %v", err.Error())
 			log.Println(err)
@@ -83,6 +80,8 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		// 1. Request-line: see #RequestLineParser
 		bufLen += readN
 		// n how much is consumed by the parse
+		// parse from the buffer
+
 		n, err := rq.parse(buf[:bufLen])
 		if err != nil {
 			log.Println(err)
@@ -103,7 +102,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 // we will reaturn with error and 0 number bytes read
 func parseRequestLine(p []byte) (*RequestLine, int, error) {
 	parsedRl := &RequestLine{}
-	log.Println("p in parseRequestLine: ", string(p))
+	// log.Println("p in parseRequestLine: ", string(p))
 
 	// a request-line ends with \r\n (CRLF), we will check the index of the SEPARTOR
 	// existence of the SEPAROTOR, indicates complete request-line bytes
@@ -162,7 +161,21 @@ outer:
 
 			r.RequestLine = rl
 			read += n
-			r.State = StateDone
+			r.State = StateParsingHeaders
+		case StateParsingHeaders:
+			n, done, err := r.Headers.Parse(p[read:])
+			if err != nil {
+				return 0, err
+			}
+			if n == 0 && !done {
+				break outer
+			}
+
+			if done {
+				r.State = StateDone
+			}
+			read += n
+
 		case StateDone:
 			break outer
 		}
