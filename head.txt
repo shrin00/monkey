@@ -1,0 +1,9 @@
+Request line:
+- Method: GET
+- Target: /coffee/hellow
+- Version: 1.1
+Headers: 
+- user-agent: curl/8.15.0
+- content-type: application/json
+- accept: application/json
+- host: localhost:42069

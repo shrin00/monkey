@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shrin00/moneky/internal/headers"
 )
@@ -17,6 +19,7 @@ const (
 	StateInit           StateParse = "init"
 	StateDone           StateParse = "done"
 	StateParsingHeaders StateParse = "parsing-headers"
+	StateParsingBody    StateParse = "parsing-body"
 )
 
 // define a request line
@@ -45,8 +48,10 @@ func newRequest() *Request {
 // Constant variables
 var SEPARATOR = []byte("\r\n")
 var HTTP_VERSION = "1.1"
+var EMPTY_STRING = ""
 var ErrorMalformedRequestLine = fmt.Errorf("malformed request line")
 var ErrorUnsupportedHttpVersion = fmt.Errorf("unsupported http version, only http 1.1 is supported")
+var ErrorContentMalformedBody = fmt.Errorf("content length doesn't match the body length")
 
 // we need to create a function to which a reader can be passed,
 // which consist of request data in the bytes format,
@@ -90,6 +95,32 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		copy(buf, buf[n:bufLen]) // copying left over bytes into buf, which bring the rest for the bytes to front
 		bufLen -= n              // reseting the bufLen to the, unparsed items of bytes
+	}
+
+	// After parsing, check for unexpected extra data with timeout
+	extra := make([]byte, 1)
+	ch := make(chan error, 1)
+	go func() {
+		n, err := reader.Read(extra)
+		if err != nil {
+			if err != io.EOF {
+				ch <- fmt.Errorf("unexpected error after parsing: %v", err)
+			} else {
+				ch <- nil
+			}
+		} else if n > 0 {
+			ch <- fmt.Errorf("unexpected extra data after parsing")
+		} else {
+			ch <- nil
+		}
+	}()
+	select {
+	case err := <-ch:
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(100 * time.Millisecond):
+		// timeout, assume no extra data
 	}
 
 	return rq, nil
@@ -172,10 +203,31 @@ outer:
 			}
 
 			if done {
-				r.State = StateDone
+				r.State = StateParsingBody
 			}
 			read += n
 
+		case StateParsingBody:
+			cl := r.Headers.Get("Content-Length")
+			if cl == EMPTY_STRING || cl == "0" {
+				r.State = StateDone
+				break outer
+			}
+			len_content, err := strconv.Atoi(cl)
+			if err != nil {
+				return 0, err
+			}
+			if len(p)-read < len_content {
+				break outer
+			}
+
+			r.Body = p[read:]
+			if strconv.Itoa(len(r.Body)) != cl {
+				return 0, ErrorContentMalformedBody
+			}
+
+			r.State = StateDone
+			read += len(r.Body)
 		case StateDone:
 			break outer
 		}

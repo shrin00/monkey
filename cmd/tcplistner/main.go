@@ -55,6 +55,7 @@ func printRequest(rq *request.Request) {
 	for key, val := range rq.Headers {
 		fmt.Printf("- %s: %s\n", key, val)
 	}
+	fmt.Printf("Body:\n%s\n", rq.Body)
 }
 
 func main() {
@@ -72,6 +73,7 @@ func main() {
 		log.Fatal("error while opening a tcp connection", err.Error())
 		os.Exit(-1)
 	}
+	log.Println("listening on address: ", conn.Addr().String())
 
 	// udp sender to listner on the localhost:42070
 	// udpAddr, _ := net.ResolveUDPAddr("udp", "localhost:42070")

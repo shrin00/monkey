@@ -52,6 +52,11 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	return n, false, nil
 }
 
+func (h Headers) Get(key string) string {
+	key = strings.ToLower(key)
+	return h[key]
+}
+
 func isValidFieldNameToken(s string) bool {
 	fnToken := regexp.MustCompile(`^[!#$%&'*+\-.^_\x60|~0-9a-zA-Z]+$`)
 
